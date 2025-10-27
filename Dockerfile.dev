@@ -1,0 +1,20 @@
+# Dev container with uv + Python 3.11
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm
+
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1
+
+# Project venv
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+# Copy just the dependency manifest for layer caching
+COPY pyproject.toml /app/
+
+# Create venv, compile lock from pyproject, and install exactly from that lock
+RUN uv venv "$VIRTUAL_ENV" \
+ && uv pip compile /app/pyproject.toml -o /opt/requirements.lock \
+ && uv pip sync /opt/requirements.lock
+
+# Bring in the rest of the project last
+COPY . /app

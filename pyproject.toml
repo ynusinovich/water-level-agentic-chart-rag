@@ -1,0 +1,16 @@
+[project]
+name = "usgs-chart-rag"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = [
+    "qdrant-client>=1.15.0,<1.16",
+    "openai>=1.0.0",
+    "requests>=2.31.0",
+    "python-dotenv>=1.0.0",
+    "pandas>=2.0.0",
+    "tqdm>=4.66.0",
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"

@@ -1,0 +1,28 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.15     # pinned; avoid :latest
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./qdrant_storage:/qdrant/storage
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    working_dir: /app
+    volumes:
+      - ./:/app  # live-edit code on host
+    env_file:
+      - .env  # contains OPENAI_API_KEY, etc.
+    environment:
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6333"
+      # You can override these in .env if you like:
+      COLLECTION_NAME: ${COLLECTION_NAME:-water_stations}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+    depends_on:
+      - qdrant
+    command: tail -f /dev/null

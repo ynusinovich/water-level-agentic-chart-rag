@@ -1,0 +1,6 @@
+.env
+README_old.md
+data_example.txt
+project_planning/*
+qdrant_storage/*
+next_steps.txt
