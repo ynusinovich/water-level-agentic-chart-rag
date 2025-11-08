@@ -29,9 +29,9 @@ cp .env.example .env
 docker compose build app
 ```
 
-4. Start Qdrant vector database:
+4. Start Qdrant vector database and app:
 ```bash
-docker compose up -d qdrant
+docker compose up -d
 ```
 
 ### Data Ingestion

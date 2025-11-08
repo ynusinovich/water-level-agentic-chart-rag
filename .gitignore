@@ -4,3 +4,6 @@ data_example.txt
 project_planning/*
 qdrant_storage/*
 next_steps.txt
+last_page*
+usgs_agent_*
+scripts/__pycache__

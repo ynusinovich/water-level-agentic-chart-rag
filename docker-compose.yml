@@ -20,9 +20,15 @@ services:
     environment:
       QDRANT_HOST: qdrant
       QDRANT_PORT: "6333"
-      # You can override these in .env if you like:
-      COLLECTION_NAME: ${COLLECTION_NAME:-water_stations}
+      QDRANT_GRPC_PORT: "6334"
+      QDRANT_URL: http://qdrant:6333
+      # Can be overwritten in .env:
+      COLLECTION_NAME: ${COLLECTION_NAME:-usgs_stations}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      LANGSMITH_TRACING_V2: ${LANGSMITH_TRACING:-true}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-water-level-agentic-chart-rag}
+      LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
     depends_on:
       - qdrant
     command: tail -f /dev/null

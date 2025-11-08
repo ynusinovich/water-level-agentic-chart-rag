@@ -14,7 +14,8 @@ COPY pyproject.toml /app/
 # Create venv, compile lock from pyproject, and install exactly from that lock
 RUN uv venv "$VIRTUAL_ENV" \
  && uv pip compile /app/pyproject.toml -o /opt/requirements.lock \
- && uv pip sync /opt/requirements.lock
+ && uv pip sync /opt/requirements.lock \
+ && "$VIRTUAL_ENV/bin/python" -m playwright install --with-deps
 
 # Bring in the rest of the project last
 COPY . /app
