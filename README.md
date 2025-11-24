@@ -82,9 +82,10 @@ docker compose run --rm app python <your_script>.py
 docker compose run --rm app bash
 ```
 
-### Regenerate / update the dependency lock
+### Regenerate/update the dependency lock without/with dev dependencies
 ```bash
 docker compose run --rm app uv pip compile pyproject.toml -o requirements.lock
+docker compose run --rm app uv pip compile pyproject.toml -o requirements.lock --extra dev
 ```
 
 ## Data Management
@@ -144,6 +145,13 @@ water-level-agentic-chart-rag/
 │   ├── ingest_data.py  # fetch + transform + embed + upsert into Qdrant
 │   └── test_search.py  # quick semantic search test
 └── qdrant_storage/  # Qdrant persistent data (created by Compose)
+```
+
+## Testing
+To run the test suite (including judge-based tests):
+
+```bash
+docker compose run --rm app pytest
 ```
 
 ## Troubleshooting

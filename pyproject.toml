@@ -13,7 +13,13 @@ dependencies = [
     "langchain-openai>=0.1.0",
     "playwright>=1.42.0,<2.0.0",
     "numpy>=1.23.0",
-    "langsmith>=0.1.147"
+    "langsmith>=0.1.147",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    # later you can add: "pytest-cov", "ruff", etc.
 ]
 
 [build-system]

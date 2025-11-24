@@ -1,0 +1,92 @@
+# 15 realistic user questions for the water-level assistant.
+# Concrete station IDs and locations were chosen from the ingested AZ/NM stations.
+questions:
+  - id: Q1
+    category: snapshot
+    question: "Give me a quick snapshot of the water level at USGS station 09525500 near Yuma, AZ over the last 24 hours."
+    stresses: ["metadata retrieval", "chart parsing", "time-window clipping"]
+    good_answer_should: "Start/end level with units, note rise/fall/stable over ~24h, mention station_id + chart URL, and flag if data are stale."
+
+  - id: Q2
+    category: metadata
+    question: "What is the current status and key metadata for USGS station 09480000 near Lochiel, AZ (name, river/stream, state, vertical datum if shown, and whether it is actively reporting now)?"
+    stresses: ["metadata payload from Qdrant", "status from chart availability"]
+    good_answer_should: "List station name/state/type/datum if present, say whether recent data exist, include station_id and chart link, avoid hallucinating fields."
+
+  - id: Q3
+    category: location-search
+    question: "Are there any USGS water level stations monitoring rivers near Yuma, AZ? If so, summarize one or two and their recent water level behavior."
+    stresses: ["semantic retrieval without id", "choosing top matches", "chart parsing"]
+    good_answer_should: "Pick 1-2 stations, justify why they fit location, give brief recent level summary, include station_ids and URLs, note if none found."
+
+  - id: Q4
+    category: trend-24h
+    question: "Is the water level at USGS station 09525500 rising, falling, or roughly stable over the last 24 hours? Include approximate start and end levels and any sharp jumps."
+    stresses: ["chart extraction", "trend calculation over short window"]
+    good_answer_should: "State start/end values with units, describe trend direction and notable jumps, cite time window, station_id, and chart URL."
+
+  - id: Q5
+    category: trend-7d
+    question: "Describe the water level trend at station 09525500 over the last 7 days. Highlight approximate minimum, maximum, and overall direction."
+    stresses: ["chart extraction over longer window", "summary stats"]
+    good_answer_should: "Report min/max/overall slope, call out variability, note station_id + chart URL, and caveat if gaps exist."
+
+  - id: Q6
+    category: threshold
+    question: "Based on the last 3 days at station 09504950, does the water level look unusually high or low for this window?"
+    stresses: ["interpreting absolute levels vs window", "cautious language"]
+    good_answer_should: "Compare recent highs/lows to typical range if visible, say normal/low/high with uncertainty, include numbers, station_id, and URL."
+
+  - id: Q7
+    category: comparison-48h
+    question: "Compare water level changes over the last 48 hours between station 09525500 near Yuma, AZ and station 09480000 near Lochiel, AZ. Which one moved more, and in what direction?"
+    stresses: ["two-station retrieval", "two chart parses", "relative change math"]
+    good_answer_should: "Summaries for both stations with start/end values, direction, absolute/percent change, and a clear statement of which changed more; include both URLs."
+
+  - id: Q8
+    category: comparison-up-down
+    question: "Compare water levels over the last week at upstream station 09480000 and downstream station 09486055 on the same river system in southern Arizona. Do upstream changes show up downstream with a delay?"
+    stresses: ["multi-station comparison", "temporal reasoning"]
+    good_answer_should: "Describe each trend and any lag/shape similarity, mention uncertainty, cite station_ids and URLs."
+
+  - id: Q9
+    category: edge-missing
+    question: "Summarize recent water levels at station 09379025 near Chinle, AZ over the last 24 hours. If there isn't enough recent data, explain that clearly and tell me the last time it reported."
+    stresses: ["handling missing/sparse data", "graceful fallback"]
+    good_answer_should: "If data exist, give 24h summary; if not, state lack of points and last timestamp visible; include station_id and URL."
+
+  - id: Q10
+    category: edge-nonexistent
+    question: "Show me recent water level data for USGS station 99999999."
+    stresses: ["invalid id handling", "error messaging"]
+    good_answer_should: "Recognize no such station in Qdrant/chart, say search failed, avoid fabricated numbers, optionally suggest checking station id."
+
+  - id: Q11
+    category: time-window-custom
+    question: "How did the water level at station 09525500 change between 2025-11-21 and 2025-11-23? Include approximate levels at the beginning and end of that interval."
+    stresses: ["custom time slicing", "chart window selection"]
+    good_answer_should: "Restrict to stated dates if visible, give start/end values with units, mention if window not fully covered, include URL."
+
+  - id: Q12
+    category: rate-of-change
+    question: "At station 09525500, what is the approximate rate of change in water level (e.g., feet per hour) over the last 12 hours? Is that rate increasing or decreasing?"
+    stresses: ["numerical derivative", "multiple sub-windows"]
+    good_answer_should: "Compute rough slope over 12h, note sign/magnitude, mention if rate is speeding up/slowing, include station_id and URL."
+
+  - id: Q13
+    category: daily-pattern
+    question: "Looking at the last 3 days at station 09380000, is there a daily pattern (for example, tidal-like ups and downs)? Summarize any repeating behavior."
+    stresses: ["pattern detection", "chart parsing over multi-day"]
+    good_answer_should: "Describe repeating peaks/troughs and cadence, quantify amplitude if possible, include station_id and URL, state if pattern unclear."
+
+  - id: Q14
+    category: outliers
+    question: "In the last 7 days at station 09484500, were there any obvious outlier spikes or drops in water level? When did they occur and how big were they compared to normal variation?"
+    stresses: ["outlier detection", "context vs typical range"]
+    good_answer_should: "Flag spikes/drops with rough magnitude and time, compare to baseline variance, cite station_id and URL, or say none seen."
+
+  - id: Q15
+    category: explain-work
+    question: "For station 09525500, explain how you used the chart data to decide whether the water level is rising or falling over the last 24 hours. Include any calculations or heuristics you used."
+    stresses: ["tool-use transparency", "analysis justification"]
+    good_answer_should: "Reference the extracted series, describe steps (windowing, start/end comparison, slope), include station_id and URL, avoid vibes-only claims."

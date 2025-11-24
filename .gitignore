@@ -4,6 +4,15 @@ data_example.txt
 project_planning/*
 qdrant_storage/*
 next_steps.txt
+note_to_self.txt
 last_page*
 usgs_agent_*
 scripts/__pycache__
+*_v0.*
+*_v1.*
+requirements.lock
+settings.json
+evals/__pycache__
+tests/__pycache__
+tests/judge/__pycache__
+tests/unit/__pycache__
