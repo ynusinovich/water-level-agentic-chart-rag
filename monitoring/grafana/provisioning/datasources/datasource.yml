@@ -1,0 +1,16 @@
+apiVersion: 1
+
+datasources:
+  - name: Postgres-Monitoring
+    uid: PG
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    user: monitoring
+    secureJsonData:
+      password: monitoring
+    jsonData:
+      database: monitoring
+      sslmode: disable
+      postgresVersion: 1600
+    isDefault: true

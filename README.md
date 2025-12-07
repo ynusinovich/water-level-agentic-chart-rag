@@ -1,184 +1,111 @@
-# Water Level Agentic Chart RAG [IN PROGRESS]
+# Water Level Agentic Chart RAG
 
-An agentic RAG system for analyzing USGS water monitoring data via semantic search, with ingestion into Qdrant and charts/analysis powered by Plotly.
+Agent that answers questions about USGS water-level charts by:
+- Finding stations via Qdrant semantic search
+- Extracting Highcharts/Plotly series via Playwright tools
+- Running an LLM to reason about trends/statistics
+- Logging every run with guardrails + monitoring dashboards
 
-## Quick Start
+## Architecture
+- **Ingestion**: `scripts/ingest_data.py` fetches USGS stations for AZ/CA/CO/NM/UT/NV, embeds with OpenAI, and upserts to Qdrant.
+- **Agent runtime**: `scripts/usgs_agent.py` (tools + LangChain agent). Always run through `scripts/invoke_agent.py` for guardrails + logging.
+- **Guardrails**: `scripts/guardrails.py` (input validation for station/state/time window + output safety).
+- **Monitoring**: JSON logs → `monitoring/runner.py` → Postgres → Streamlit UI (`monitoring/app.py`) + Grafana dashboards (`monitoring/grafana/...`).
+- **Evals**: `evals/` scripts + CSVs for manual/LLM judging.
+- **Tests**: `tests/` (unit + judge-based).
 
-### Prerequisites
-- Docker and Docker Compose
-- An OpenAI API key
+## Prerequisites
+- Docker & Docker Compose
+- OpenAI API key (required)
+- Optional LangSmith key (already wired via env vars)
+- Python/uv only if you prefer to run outside Docker; all commands below assume Docker.
 
-### Installation
+## Environment variables (.env)
+- `OPENAI_API_KEY` (required)
+- `OPENAI_BASE_URL` (optional, default https://api.openai.com/v1)
+- `COLLECTION_NAME` (default `usgs_stations`)
+- `LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` (optional tracing)
+- Monitoring stack uses `DATABASE_URL` via docker-compose (no manual config needed).
 
-1. Clone the repository:
+## Quickstart
+1. Build image and start core services:
+   - `make build`
+   - `make up`
+2. Ingest stations:
+   - `make ingest`
+3. Start monitoring stack:
+   - `make monitoring-up`
+4. Ask a few questions in the CLI (see "Example Questions" section, below):
+   - `make cli`
+5. Open monitoring UIs:
+   - Streamlit at http://localhost:8501
+   - Grafana at http://localhost:3000
+6. (Optional) Run tests:
+   - `make test`
+
+## Ingestion
+Populate Qdrant with Southwest stations:
 ```bash
-git clone https://github.com/ynusinovich/water-level-agentic-chart-rag.git
-cd water-level-agentic-chart-rag
+make ingest
 ```
 
-2. Create your environment file:
+## Monitoring & Guardrails
+- Start monitoring stack:
 ```bash
-cp .env.example .env
-# edit .env and set:
-# OPENAI_API_KEY=sk-...
-# (you can also set COLLECTION_NAME / OPENAI_BASE_URL here if you want)
+make monitoring-up
 ```
+- Logs are written to `logs/` (JSON). `log-poller` ingests into Postgres.
+- UIs:
+  - Streamlit monitoring: http://localhost:8501
+  - Grafana: http://localhost:3000 (admin/admin). Dashboards auto-provisioned from `monitoring/grafana/dashboards`.
+- Guardrails are always active via `scripts/invoke_agent.py` (used by `scripts/usgs_agent.py`).
 
-3. Build the app image:
+## Running the agent
+Interactive CLI:
 ```bash
-docker compose build app
+make cli
 ```
+(Internally calls `invoke_agent`, which runs guardrails, logs, and tags LangSmith.)
 
-4. Start Qdrant vector database and app:
-```bash
-docker compose up -d
-```
-
-### Data Ingestion
-
-Run the initial data ingestion:
-```bash
-docker compose run --rm app python scripts/ingest_data.py
-```
-
-This will:
-- Fetch USGS monitoring station metadata
-- Create embeddings for semantic search
-- Store in Qdrant vector database
-
-### Testing Search
-
-Test the semantic search functionality:
-```bash
-docker compose run --rm app python scripts/test_search.py
-```
-
-## Verifying Functionality
-
-### Qdrant readiness:
-```bash
-curl -s http://localhost:6333/readyz
-```
-
-### List collections:
-```bash
-curl -s http://localhost:6333/collections | jq
-```
-
-### Inspect collection:
-```bash
-curl -s http://localhost:6333/collections/water_stations | jq
-```
-
-## Developer Workflow
-
-### Run any script in the container
-```bash
-docker compose run --rm app python <your_script>.py
-```
-
-### Open a shell in the app container
-```bash
-docker compose run --rm app bash
-```
-
-### Regenerate/update the dependency lock without/with dev dependencies
-```bash
-docker compose run --rm app uv pip compile pyproject.toml -o requirements.lock
-docker compose run --rm app uv pip compile pyproject.toml -o requirements.lock --extra dev
-```
-
-## Data Management
-
-### Full reset (wipe volumes)
-
-```bash
-docker compose down -v
-docker compose up -d qdrant
-docker compose run --rm app python ingest_data.py
-```
-
-### Reingest without restarting Docker
-
-```bash
-docker compose run --rm app python ingest_data.py
-```
-
-## Verify Data
-
-Check if data was ingested correctly:
-```bash
-# Check Qdrant is running
-curl http://localhost:6333/collections
-
-# Check collection details
-curl http://localhost:6333/collections/usgs_stations
-```
-
-## Configuration
-- Environment variables (from .env and/or docker-compose.yml):
-
-- OPENAI_API_KEY – required
-
-- OPENAI_BASE_URL – defaults to https://api.openai.com/v1
-
-- COLLECTION_NAME – defaults to water_stations
-
-- QDRANT_HOST – set by Compose to qdrant (container name)
-
-- QDRANT_PORT – defaults to 6333
-
-- Command-line options:
-    - --iv-only (optional): restricts USGS stations to sites that have instantaneous values (IV).
-Omit this to include more groundwater sites that often lack IV.
-
-## Project Structure
-```
-water-level-agentic-chart-rag/
-├── docker-compose.yml  # qdrant (pinned) + app (uv-based)
-├── Dockerfile.dev  # builds app image, creates uv lock, installs from loc
-├── .env.example  # template for env vars
-├── requirements.lock  # generated inside container
-├── README.md  # this file
-├── pyproject.toml  # dependencies (source of truth)
-├── scripts/
-│   ├── ingest_data.py  # fetch + transform + embed + upsert into Qdrant
-│   └── test_search.py  # quick semantic search test
-└── qdrant_storage/  # Qdrant persistent data (created by Compose)
-```
+## Example questions
+- “Give me a quick snapshot of current water levels at station 09421500 for the last 24 hours.”
+- “Find a nearby station to Bagdad, AZ with recent non-zero water levels and summarize the last 24 hours.”
+- “Compare the last 48 hours of water level at stations 09180500 and 09179000. Which one is rising faster?”
+- “For Colorado, pick a surface-water station with at least a week of recent data and summarize the 7-day trend.”
+- “Tell me whether station 09421500 has gone above 5 feet at any point in the last 7 days.”
+These are just examples; the agent should work for other reasonable USGS water-level questions within AZ, CA, CO, NM, UT, and NV.
 
 ## Testing
-To run the test suite (including judge-based tests):
-
+Run inside the app container:
 ```bash
-docker compose run --rm app pytest
+make test  # all tests
+make test-unit  # unit tests only
+make test-judge  # judge-based tests
 ```
 
-## Troubleshooting
+## Services & Ports
+- Qdrant: http://localhost:6333 (API), 6334 (gRPC)
+- Monitoring Postgres: exposed on 5432
+- Streamlit monitoring app: http://localhost:8501
+- Grafana: http://localhost:3000 (admin/admin)
 
-### OpenAI API Key Error
-Ensure your `.env` file contains:
+## Project Structure (key paths)
 ```
-OPENAI_API_KEY=sk-...your-key-here...
-```
-
-### Qdrant Connection Error
-Check if Qdrant is running:
-```bash
-docker compose ps
-```
-
-If not running, start it:
-```bash
-docker compose up -d qdrant
+scripts/  # ingest_data.py, usgs_agent.py, invoke_agent.py, guardrails.py
+monitoring/  # logging, callbacks, db, evaluator, runner, Streamlit app, Grafana provisioning
+evals/  # questions, manual eval logs, ground-truth builder
+tests/  # unit + judge-based tests
+docker-compose.yml  # app, qdrant, monitoring stack
+Dockerfile.dev  # dev image with uv + Playwright
 ```
 
-### Rate Limiting
-The ingestion script includes delays to respect API rate limits. If you encounter rate limit errors:
-- For USGS: The script already includes 0.5s delays
-- For OpenAI: Reduce batch size in `ingest_data.py` (default is 50)
+## Remove data and services
 
-### Memory Issues
-If running on a low-memory system:
-- Reduce the batch size in `ingest_data.py`
-- Ingest fewer states at once (modify the `states` list)
+To stop the services and remove this project’s containers and volumes from your system:
+
+Using the Makefile:
+```
+make monitoring-down  # stop monitoring services
+make down  # stop app & Qdrant
+make reset-data  # stop everything and remove project volumes
+```

@@ -20,18 +20,19 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from openai import OpenAI
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 from playwright.sync_api import sync_playwright
+from qdrant_client import QdrantClient
+
+from scripts.invoke_agent import invoke_agent
 
 PW_HEADLESS = os.getenv("PW_HEADLESS", "1") != "0"
 PW_ARGS = ["--disable-dev-shm-usage"]
-CHART_READY_TIMEOUT_MS = int(os.getenv("CHART_READY_TIMEOUT_MS", "60000"))
-NAV_TIMEOUT_MS = int(os.getenv("PW_NAV_TIMEOUT_MS", "60000"))
+CHART_READY_TIMEOUT_MS = int(os.getenv("CHART_READY_TIMEOUT_MS", "90000"))
+NAV_TIMEOUT_MS = int(os.getenv("PW_NAV_TIMEOUT_MS", "90000"))
 
 
 # Infra helpers
 
 def _get_qdrant_client():
-    from qdrant_client import QdrantClient
-    import os
     return QdrantClient(
         url=os.getenv("QDRANT_URL", "http://qdrant:6333"),
         prefer_grpc=False,
@@ -77,7 +78,7 @@ def _with_retry(fn, tries=2, pause_ms=800):
 
 @tool
 def query_metadata(
-    query: str,
+    query: str = "",
     top_k: int = 5,
     state: Optional[str] = None,  # supports "AZ", "Arizona", "AZ|CA", "Arizona, California"
     station_type: Optional[str] = None,  # supports "surface-water", "stream", "river", "ST", etc.
@@ -124,11 +125,20 @@ def query_metadata(
         if "spring" in t or t == "sp":
             return "spring"
         return None  # drop unknowns
+    
+    effective_query = (query or "").strip()
+    if not effective_query:
+        parts = ["USGS station"]
+        if station_type:
+            parts.append(f"for {station_type}")
+        if state:
+            parts.append(f"in {state}")
+        effective_query = " ".join(parts)
 
     # Embed the query
     response = openai_client.embeddings.create(
         model="text-embedding-3-small",
-        input=query,
+        input=effective_query,
     )
     embedding = response.data[0].embedding
 
@@ -542,7 +552,6 @@ def build_agent_executor() -> AgentExecutor:
 # CLI
 
 def main() -> None:
-    executor = build_agent_executor()
     print("USGS Analysis Agent (LangChain 0.2.x / Tool-calling)\nPress Ctrl+C to exit.")
 
     while True:
@@ -550,13 +559,8 @@ def main() -> None:
             query = input(">>> ").strip()
             if not query:
                 continue
-
-            result = executor.invoke(
-                {"input": query},
-                config={"tags": ["dev", "usgs"], "metadata": {"source": "cli"}},
-            )
-            answer = result.get("output", result)
-            print(answer)
+            result = invoke_agent(query, metadata={"source": "cli"})
+            print(result.get("output", ""))
 
         except (KeyboardInterrupt, EOFError):
             print("\nExiting agent.")

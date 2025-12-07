@@ -1,0 +1,47 @@
+{
+  "uid": "usgs-failures",
+  "title": "USGS Agent - Failures",
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "type": "piechart",
+      "title": "Guardrail reasons",
+      "datasource": { "type": "postgres", "uid": "PG" },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT COALESCE(guardrail_reason,'none') AS reason, count(*) AS count FROM llm_logs GROUP BY 1 ORDER BY count DESC",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
+    },
+    {
+      "type": "table",
+      "title": "Top failed checks",
+      "datasource": { "type": "postgres", "uid": "PG" },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT check_name, count(*) AS failures FROM eval_checks WHERE passed = false GROUP BY check_name ORDER BY failures DESC",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
+    },
+    {
+      "type": "table",
+      "title": "Recent guardrail-triggered runs",
+      "datasource": { "type": "postgres", "uid": "PG" },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT id, created_at, station_id, question_type, guardrail_reason FROM llm_logs WHERE guardrail_triggered = true ORDER BY id DESC LIMIT 20",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 }
+    }
+  ]
+}

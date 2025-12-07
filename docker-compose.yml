@@ -1,6 +1,6 @@
 services:
   qdrant:
-    image: qdrant/qdrant:v1.15     # pinned; avoid :latest
+    image: qdrant/qdrant:v1.15
     restart: unless-stopped
     ports:
       - "6333:6333"
@@ -29,6 +29,81 @@ services:
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY}
       LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-water-level-agentic-chart-rag}
       LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+      PW_NAV_TIMEOUT_MS: "90000"  # 90s navigation timeout
+      CHART_READY_TIMEOUT_MS: "90000"  # 90s wait for Highcharts data
     depends_on:
       - qdrant
     command: tail -f /dev/null
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: monitoring
+      POSTGRES_USER: monitoring
+      POSTGRES_PASSWORD: monitoring
+    ports:
+      - "5432:5432"
+    volumes:
+      - monitoring-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  log-poller:
+    image: python:3.11-slim
+    working_dir: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://monitoring:monitoring@postgres:5432/monitoring
+      LOGS_DIR: /app/logs
+      PROCESSED_PREFIX: "_"
+    volumes:
+      - .:/app
+    command: >
+      bash -lc "pip install --no-cache-dir psycopg[binary] && python -m monitoring.runner --watch"
+    restart: unless-stopped
+
+  monitoring-app:
+    image: python:3.11-slim
+    working_dir: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://monitoring:monitoring@postgres:5432/monitoring
+      LOGS_DIR: /app/logs
+      PYTHONPATH: /app
+    volumes:
+      - .:/app
+    command: >
+      bash -lc "pip install --no-cache-dir streamlit psycopg[binary] && streamlit run monitoring/app.py --server.address 0.0.0.0 --server.port 8501"
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.7
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_DEFAULT_THEME: light
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+    restart: unless-stopped
+
+volumes:
+  qdrant_storage:
+    external: false
+  monitoring-pgdata:
+  grafana-data:

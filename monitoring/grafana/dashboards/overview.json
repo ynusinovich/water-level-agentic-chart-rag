@@ -1,0 +1,60 @@
+{
+  "uid": "usgs-overview",
+  "title": "USGS Agent - Overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Requests over time",
+      "datasource": { "type": "postgres", "uid": "PG" },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroup(created_at,$__interval) AS time, count(*) AS value FROM llm_logs GROUP BY 1 ORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Guardrail fire rate",
+      "datasource": { "type": "postgres", "uid": "PG" },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroup(created_at,$__interval) AS time, avg(CASE WHEN guardrail_triggered THEN 1 ELSE 0 END) AS value FROM llm_logs GROUP BY 1 ORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
+    },
+    {
+      "type": "bargauge",
+      "title": "Eval pass rate by check",
+      "datasource": { "type": "postgres", "uid": "PG" },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT check_name, avg(CASE WHEN passed THEN 1 ELSE 0 END) AS pass_rate FROM eval_checks GROUP BY check_name",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 }
+    },
+    {
+      "type": "table",
+      "title": "Recent runs",
+      "datasource": { "type": "postgres", "uid": "PG" },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT id, created_at, station_id, question_type, guardrail_triggered, total_input_tokens, total_output_tokens FROM llm_logs ORDER BY id DESC LIMIT 20",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 }
+    }
+  ]
+}
