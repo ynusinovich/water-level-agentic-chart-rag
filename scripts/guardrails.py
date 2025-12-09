@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime as dt
+import json
 import re
 from dataclasses import dataclass
 from typing import Any, List, Optional
@@ -11,7 +13,7 @@ class GuardrailResult:
     reason: Optional[str] = None
     user_message: Optional[str] = None
     soft_flag: bool = False
-    station_ids: List[str] = []
+    station_ids: Optional[List[str]] = None
     state_filter: Optional[str] = None
     time_window: Optional[str] = None
     question_type: Optional[str] = None
@@ -25,10 +27,12 @@ class OutputGuardrailResult:
     triggered: bool
     reason: Optional[str] = None
     answer: str = ""
+    warnings: Optional[str] = None
 
 
 OFF_TOPIC_HINTS = {"love poem", "romantic", "recipe", "song lyrics", "movie", "book review"}
 ALLOWED_STATE_CODES = {"AZ", "CA", "CO", "NM", "UT", "NV"}
+STATION_ID_REGEX = re.compile(r"\d{7,15}")
 
 # Basic US state name/abbrev map for detection
 STATE_NAME_TO_CODE = {
@@ -89,20 +93,28 @@ def _parse_station_ids(text: str) -> List[str]:
     """
     Extract candidate station id tokens from the text.
 
-    Allow 7-15 character alphanumeric/hyphen tokens that contain at least
-    one digit. Purely numeric tokens are treated as valid USGS IDs; mixed
-    tokens (letters or hyphens) will later be rejected as invalid_station_id.
+    Find 7-15 digit tokens (purely numeric). Mixed alnum tokens are handled
+    separately as invalids.
     """
     ids: List[str] = []
-    # Allow letters, digits, and hyphens, 7–15 chars
-    for m in re.finditer(r"\b[A-Za-z0-9\-]{7,15}\b", text):
+    for m in STATION_ID_REGEX.finditer(text):
         token = m.group(0)
-        # Require at least one digit so we don't treat normal words as IDs
-        if not any(ch.isdigit() for ch in token):
-            continue
         if token not in ids:
             ids.append(token)
     return ids
+
+
+def _find_mixed_station_tokens(text: str) -> List[str]:
+    """
+    Find 7-15 length tokens that include digits but are not all digits
+    (likely invalid station ids such as 'ABC123XYZ').
+    """
+    mixed: List[str] = []
+    for m in re.finditer(r"\b[A-Za-z0-9\-]{7,15}\b", text):
+        tok = m.group(0)
+        if any(ch.isdigit() for ch in tok) and not tok.isdigit():
+            mixed.append(tok)
+    return mixed
 
 
 def _parse_state(text: str) -> tuple[Optional[str], Optional[bool]]:
@@ -138,11 +150,41 @@ def _parse_state(text: str) -> tuple[Optional[str], Optional[bool]]:
 
 
 def _parse_time_window(text: str) -> Optional[str]:
-    m = re.search(r"last\s+(\d+)\s*(hour|hours|day|days|week|weeks|month|months|year|years)", text, re.I)
+    """
+    Parse user text for a time window like:
+      - 'last 24 hours', 'last 7 days', 'last 2 weeks', ...
+      - or phrase-only: 'last week', 'last month', 'last year', 'last decade'
+
+    Returns a normalized string like '24 hours', '7 days', '30 days', '365 days', '10 years',
+    or 'invalid' / 'too_long' / None.
+    """
+    if not text:
+        return None
+
+    lower = text.lower()
+
+    # Handle phrase-only windows (no explicit number)
+    if re.search(r"\blast\s+week\b", lower):
+        return "7 days"
+    if re.search(r"\blast\s+month\b", lower):
+        return "30 days"
+    if re.search(r"\blast\s+year\b", lower):
+        return "365 days"
+    if re.search(r"\blast\s+decade\b", lower):
+        # Treat 'last decade' as a 10-year window
+        return "10 years"
+
+    # Existing numeric pattern: 'last 24 hours', 'last 7 days', etc.
+    m = re.search(
+        r"last\s+(\d+)\s*(hour|hours|day|days|week|weeks|month|months|year|years)",
+        lower,
+    )
     if not m:
         return None
+
     value = int(m.group(1))
     unit = m.group(2).lower()
+
     if value < 0:
         return "invalid"
     if unit.startswith("year") and value > 1:
@@ -155,12 +197,14 @@ def _parse_time_window(text: str) -> Optional[str]:
         return "too_long"
     if unit.startswith("hour") and value > 24 * 365:
         return "too_long"
+
     return f"{value} {unit}"
 
 
 def validate_input(user_text: str) -> GuardrailResult:
     text = user_text.strip()
     station_ids = _parse_station_ids(text)
+    mixed_station_tokens = _find_mixed_station_tokens(text)
     time_window = _parse_time_window(text)
     state_code, state_allowed = _parse_state(text)
 
@@ -196,6 +240,13 @@ def validate_input(user_text: str) -> GuardrailResult:
             user_message="Station IDs must be digits only (7-15 characters).",
             station_ids=[],
         )
+    if not station_ids and mixed_station_tokens:
+        return GuardrailResult(
+            fail=True,
+            reason="invalid_station_id",
+            user_message="Station IDs must be digits only (7-15 characters).",
+            station_ids=[],
+        )
 
     soft_flag = not station_ids
     return GuardrailResult(
@@ -216,8 +267,91 @@ def _extract_successful_series(step_output: Any) -> bool:
     return False
 
 
-def apply_output_guardrails(answer: str, intermediate_steps: list, station_ids: List[str]) -> OutputGuardrailResult:
+def _extract_series_values(step_output: Any) -> list[float]:
+    vals = []
+    data = None
+    if isinstance(step_output, dict):
+        data = step_output.get("data") if "data" in step_output else step_output.get("values")
+        if data is None and "output" in step_output:
+            data = step_output.get("output")
+    elif isinstance(step_output, str):
+        try:
+            parsed = json.loads(step_output)
+            data = parsed.get("data")
+        except Exception:
+            data = None
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict) and "y" in item:
+                try:
+                    vals.append(float(item["y"]))
+                except Exception:
+                    continue
+            else:
+                try:
+                    vals.append(float(item))
+                except Exception:
+                    continue
+    return vals
+
+
+def _extract_timestamps_ms(step_output: Any) -> list[float]:
+    parsed = step_output
+    if isinstance(step_output, str):
+        try:
+            parsed = json.loads(step_output)
+        except Exception:
+            return []
+    if not isinstance(parsed, dict):
+        return []
+    data = parsed.get("data") if "data" in parsed else parsed.get("values")
+    if not isinstance(data, list) or not data:
+        return []
+    xs: list[float] = []
+    for item in data:
+        if isinstance(item, dict) and "x" in item:
+            try:
+                xs.append(float(item.get("x")))
+            except Exception:
+                continue
+    return xs
+
+
+def _parse_time_window_to_timedelta(time_window: Optional[str]) -> Optional[dt.timedelta]:
+    """
+    Convert normalized time_window strings like '24 hours', '48 hours', '7 days',
+    '2 weeks', '6 months', '1 year', '10 years' into a timedelta.
+    Returns None if parsing fails.
+    """
+    if not time_window:
+        return None
+    win = time_window.strip().lower()
+    m = re.search(r"(\d+)\s*(hour|hours|day|days|week|weeks|month|months|year|years|decade|decades)", win)
+    if not m:
+        return None
+    val = int(m.group(1))
+    unit = m.group(2)
+    if "hour" in unit:
+        return dt.timedelta(hours=val)
+    if "day" in unit:
+        return dt.timedelta(days=val)
+    if "week" in unit:
+        return dt.timedelta(days=7 * val)
+    if "month" in unit:
+        return dt.timedelta(days=30 * val)
+    if "year" in unit:
+        return dt.timedelta(days=365 * val)
+    if "decade" in unit:
+        return dt.timedelta(days=3650 * val)
+    return None
+
+
+def apply_output_guardrails(answer: str, intermediate_steps: list, station_ids: List[str], time_window: Optional[str] = None) -> OutputGuardrailResult:
     has_extract_success = False
+    timestamps_present = False
+    list_series_empty = False
+    series_values: list[float] = []
+    last_ts_ms: Optional[float] = None
     for step in intermediate_steps or []:
         if not isinstance(step, (list, tuple)) or len(step) != 2:
             continue
@@ -228,25 +362,79 @@ def apply_output_guardrails(answer: str, intermediate_steps: list, station_ids: 
         elif hasattr(action, "tool"):
             tool_name = getattr(action, "tool", None)
         if tool_name and tool_name not in {"extract_highcharts_series", "extract_plotly_series"}:
+            if tool_name in {"list_highcharts_series", "list_plotly_traces"}:
+                try:
+                    if isinstance(observation, dict):
+                        data = observation.get("data")
+                        if data == []:
+                            list_series_empty = True
+                except Exception:
+                    pass
             continue
         if _extract_successful_series(observation):
             has_extract_success = True
+            parsed_obs = observation
+            if isinstance(observation, str):
+                try:
+                    parsed_obs = json.loads(observation)
+                except Exception:
+                    parsed_obs = observation
+            if isinstance(parsed_obs, dict):
+                data = parsed_obs.get("data") if "data" in parsed_obs else parsed_obs.get("values")
+                if isinstance(data, list) and data and isinstance(data[0], dict) and "x" in data[0]:
+                    timestamps_present = True
+                xs = _extract_timestamps_ms(parsed_obs)
+                if xs:
+                    last_ts_ms = max(xs)
+            series_values = _extract_series_values(observation)
             break
 
     if has_extract_success:
+        warnings: List[str] = []
+        warning_reason: Optional[str] = None
+        if series_values:
+            nonzero = [v for v in series_values if abs(v) > 1e-6]
+            if len(nonzero) == 0 or len(nonzero) <= max(1, int(0.02 * len(series_values))):
+                warnings.append(
+                    "Values are at or near zero throughout this period. That can mean dry conditions, "
+                    "flow below the sensor threshold, or missing/offline data. Interpret with caution."
+                )
+        if time_window and not timestamps_present:
+            tw_note = f"Requested window ({time_window}) but the extracted series lacked timestamps; values may not align exactly."
+            warnings.append(tw_note)
+
+        if time_window and last_ts_ms is not None:
+            delta = _parse_time_window_to_timedelta(time_window)
+            if delta:
+                last_dt = dt.datetime.utcfromtimestamp(last_ts_ms / 1000.0)
+                now = dt.datetime.utcnow()
+                if now - last_dt > delta:
+                    warning_reason = "stale_data"
+                    warnings.append(
+                        f"No measurements fall within the requested window ({time_window}). "
+                        f"The last available observation is from {last_dt.isoformat()}Z."
+                    )
+
+        if warnings:
+            caveat = " ".join(warnings)
+            adjusted = f"{answer}\n\nCaveat: {caveat}"
+            return OutputGuardrailResult(triggered=False, answer=adjusted, warnings=caveat, reason=warning_reason)
         return OutputGuardrailResult(triggered=False, answer=answer)
 
     station = station_ids[0] if station_ids else "the requested station"
+    reason = "no_chart_data"
     disclaimer = (
         f"No recent chart data was available for {station}; numeric values are omitted. "
         "Please provide another station or timeframe."
     )
-    if answer:
-        adjusted = f"{disclaimer}\n\nPrevious draft (for transparency, may be incomplete):\n{answer}"
-    else:
-        adjusted = disclaimer
+    if list_series_empty:
+        reason = "no_recent_data"
+        disclaimer = "Charts were empty or unavailable; this station may be inactive or have no recent data. Please try another station or location."
+
+    adjusted = disclaimer
+
     return OutputGuardrailResult(
         triggered=True,
-        reason="no_chart_data",
+        reason=reason,
         answer=adjusted,
     )

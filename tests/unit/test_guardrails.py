@@ -38,6 +38,43 @@ def test_output_guardrail_passes_when_extract_success():
     assert og.answer == "value is 3.2"
 
 
+def test_zero_series_adds_caveat():
+    steps = [
+        (
+            {"tool": "extract_highcharts_series"},
+            {"success": True, "data": [0.0, 0.0, 0.0, 0.0]}
+        )
+    ]
+    og = apply_output_guardrails("all zero", steps, ["12345678"])
+    assert og.triggered is False
+    assert "at or near zero" in og.answer
+
+
+def test_no_recent_data_reason_when_list_empty():
+    steps = [
+        (
+            {"tool": "list_highcharts_series"},
+            {"success": True, "data": []}
+        )
+    ]
+    og = apply_output_guardrails("draft", steps, ["12345678"])
+    assert og.triggered is True
+    assert og.reason == "no_recent_data"
+    assert "no recent data" in og.answer.lower()
+
+
+def test_time_window_without_timestamps_adds_note():
+    steps = [
+        (
+            {"tool": "extract_highcharts_series"},
+            {"success": True, "data": [1.0, 2.0]}
+        )
+    ]
+    og = apply_output_guardrails("draft", steps, ["12345678"], time_window="24 hours")
+    assert og.triggered is False
+    assert "lacked timestamps" in og.answer.lower()
+
+
 def test_invalid_time_window_blocks():
     res = validate_input("Show me water levels for the last 1000 days in Colorado.")
     assert res.fail is True

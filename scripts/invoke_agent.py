@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
@@ -11,6 +12,18 @@ from scripts.guardrails import (
     apply_output_guardrails,
     validate_input,
 )
+
+TMP_DIR = os.getenv("APP_TMP_DIR", "/app/.tmp")
+
+
+def _write_last_user_query(text: str) -> None:
+    """Persist last user query for window inference fallbacks."""
+    try:
+        tmp = Path(TMP_DIR)
+        tmp.mkdir(parents=True, exist_ok=True)
+        (tmp / "last_user_query.txt").write_text(text or "", encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _detect_question_type(user_text: str) -> Optional[str]:
@@ -29,6 +42,7 @@ def invoke_agent(user_text: str, metadata: Optional[Dict[str, Any]] = None, logs
     Unified entrypoint that applies guardrails, runs the agent with monitoring callbacks,
     and writes structured logs.
     """
+    _write_last_user_query(user_text)
     from scripts.usgs_agent import build_agent_executor  # local import to avoid cycles
 
     request_id = str(uuid4())
@@ -36,7 +50,7 @@ def invoke_agent(user_text: str, metadata: Optional[Dict[str, Any]] = None, logs
     input_check: GuardrailResult = validate_input(user_text)
     question_type = _detect_question_type(user_text)
 
-    model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    model_name = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
     provider = "openai"
     callback_state = CallbackState(
         user_prompt=user_text,
@@ -98,6 +112,7 @@ def invoke_agent(user_text: str, metadata: Optional[Dict[str, Any]] = None, logs
         answer=str(raw_answer),
         intermediate_steps=intermediate_steps,
         station_ids=input_check.station_ids,
+        time_window=input_check.time_window,
     )
 
     cb.finalize(

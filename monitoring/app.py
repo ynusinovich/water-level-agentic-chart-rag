@@ -33,6 +33,10 @@ def main():
 
     with st.sidebar:
         st.subheader("Filters")
+        question_type = st.text_input(
+            "Question type contains (optional)", 
+            ""
+        )
         guardrail = st.selectbox("Guardrail triggered", options=["Any", "Yes", "No"], index=0)
         page_size = st.number_input("Page size", min_value=10, max_value=200, value=50, step=10)
 

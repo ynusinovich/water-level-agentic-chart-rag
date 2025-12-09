@@ -18,3 +18,5 @@ tests/judge/__pycache__
 tests/unit/__pycache__
 logs/*
 monitoring/__pycache__
+archive/*
+.tmp/*

@@ -1,3 +1,14 @@
+"""
+Build ground-truth reference answers using the agent (invoke_agent) plus an LLM judge.
+
+Reads evals/manual_eval_log_evaluated.csv (or manual_eval_log_with_gt.csv if present) and writes
+evals/manual_eval_log_with_gt.csv with columns:
+id, category, question, answer, tool_calls_observed, issues_gaps, follow_ups, reference_answer, is_correct, judge_notes
+
+- Uses invoke_agent(question, metadata={"source": "ground_truth_builder"}) to generate the answer/tool calls.
+- Uses OpenAI LLM to generate reference_answer, is_correct, judge_notes with retry/backoff on rate limits.
+"""
+
 import csv
 import os
 import time
@@ -6,9 +17,11 @@ from typing import Dict, Any
 
 from openai import OpenAI, RateLimitError
 
+from scripts.invoke_agent import invoke_agent
+
 client = OpenAI()  # uses OPENAI_API_KEY from env
 
-INPUT_CSV = "manual_eval_log.csv"
+INPUT_CSV = "manual_eval_log_evaluated.csv"
 OUTPUT_CSV = "manual_eval_log_with_gt.csv"
 
 SYSTEM_PROMPT = """
@@ -73,7 +86,7 @@ def call_judge_with_backoff(messages, max_retries: int = 5):
     for attempt in range(1, max_retries + 1):
         try:
             return client.chat.completions.create(
-                model="gpt-5.1",
+                model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
                 messages=messages,
                 response_format={"type": "json_object"},
             )
@@ -91,6 +104,25 @@ def judge_row(row: Dict[str, str]) -> Dict[str, str]:
     # If we already have a reference answer, skip re-judging
     if row.get("reference_answer"):
         return row
+
+    # Run the agent through invoke_agent to get answer + tool info
+    agent_result = invoke_agent(row.get("question", ""), metadata={"source": "ground_truth_builder", "id": row.get("id")})
+    answer = str(agent_result.get("output", ""))
+    tool_calls = agent_result.get("intermediate_steps", [])
+    tool_calls_str = ""
+    if tool_calls:
+        lines = []
+        for i, step in enumerate(tool_calls, start=1):
+            if not isinstance(step, (list, tuple)) or len(step) != 2:
+                lines.append(f"[{i}] Unexpected step format: {repr(step)}")
+                continue
+            action, observation = step
+            tool_name = getattr(action, "tool", getattr(action, "tool_name", type(action).__name__))
+            tool_input = getattr(action, "tool_input", getattr(action, "input", None))
+            lines.append(f"[{i}] Tool={tool_name} | input={tool_input!r} | observation={observation!r}")
+        tool_calls_str = "\n".join(lines)
+    row["answer"] = answer
+    row["tool_calls_observed"] = row.get("tool_calls_observed") or tool_calls_str
 
     messages = build_messages(row)
     response = call_judge_with_backoff(messages)
